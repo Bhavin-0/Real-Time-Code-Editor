@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens — all UI must reference these via Tailwind maps to canvas/elevated/foreground/muted/accent/outline
+ */
+html.light {
+  --bg-primary: #f1f5f9;
+  --bg-secondary: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --accent: #2563eb;
+  --border: #e2e8f0;
+  --shadow-soft: 0 1px 3px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.06);
+}
+
+html.dark {
+  --bg-primary: #0b0d10;
+  --bg-secondary: #13161c;
+  --text-primary: #eef1f5;
+  --text-secondary: #94a3b8;
+  --accent: #60a5fa;
+  --border: #273141;
+  --shadow-soft: 0 4px 24px rgb(0 0 0 / 0.45);
+}
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    @apply transition-colors duration-200;
+  }
+
+  body {
+    @apply m-0 min-h-screen bg-canvas text-foreground antialiased;
+  }
+}
