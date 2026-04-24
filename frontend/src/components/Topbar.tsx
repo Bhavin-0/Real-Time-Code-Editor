@@ -1,5 +1,5 @@
 import ThemeToggle from './ThemeToggle';
-import type { Collaborator } from './UsersPanel';
+import type { Collaborator } from './UsersPanel.tsx';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -10,6 +10,7 @@ type TopbarProps = {
   collaborators: Collaborator[];
   onCopyRoomLink: () => void;
   onDeleteRoom: () => void;
+  canDeleteRoom: boolean;
 };
 
 function initials(name: string): string {
@@ -60,6 +61,7 @@ export default function Topbar({
   collaborators,
   onCopyRoomLink,
   onDeleteRoom,
+  canDeleteRoom,
 }: TopbarProps) {
   return (
     <header className="flex min-h-[56px] shrink-0 flex-wrap items-center justify-between gap-3 border-b border-outline bg-elevated px-4 py-3 shadow-soft md:px-6 md:py-4">
@@ -112,16 +114,18 @@ export default function Topbar({
           onClick={onCopyRoomLink}
           className="rounded-lg border border-outline bg-canvas px-4 py-2 text-sm font-medium text-foreground shadow-soft transition-all duration-200 hover:border-accent hover:bg-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40"
         >
-          Copy room link
+          Copy room ID
         </button>
 
-        <button
-          type="button"
-          onClick={onDeleteRoom}
-          className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-500 transition hover:bg-rose-500/15"
-        >
-          Delete room
-        </button>
+        {canDeleteRoom ? (
+          <button
+            type="button"
+            onClick={onDeleteRoom}
+            className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-500 transition hover:bg-rose-500/15"
+          >
+            Delete room
+          </button>
+        ) : null}
 
         <ThemeToggle />
       </div>

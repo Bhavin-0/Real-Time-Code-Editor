@@ -6,6 +6,14 @@ export type RoomUser = {
   userName: string;
 };
 
+export type ChatMessage = {
+  messageId: string;
+  userId: string;
+  userName: string;
+  content: string;
+  sentAt: number;
+};
+
 export type CodePayload = {
   roomId: string;
   content: string;
@@ -21,6 +29,8 @@ export type RoomBroadcast =
       userName: string | null;
       content: string;
       users: RoomUser[];
+      chatMessages: ChatMessage[];
+      roomOwnerId: string | null;
     }
   | {
       kind: 'CODE_SYNC';
@@ -29,14 +39,26 @@ export type RoomBroadcast =
       userName: string | null;
       content: string;
       users: RoomUser[];
+      chatMessages: ChatMessage[];
+      roomOwnerId: string | null;
     }
   | {
-      kind: 'USER_LIST' | 'USER_JOINED' | 'USER_LEFT' | 'ROOM_DELETED';
+    kind:
+      | 'USER_LIST'
+      | 'USER_JOINED'
+      | 'USER_LEFT'
+      | 'USER_REMOVED'
+      | 'ROOM_NOT_FOUND'
+      | 'ROOM_DELETED'
+      | 'CHAT_HISTORY'
+      | 'CHAT_MESSAGE';
       roomId: string;
       userId: string;
       userName: string | null;
       content: string;
       users: RoomUser[];
+      chatMessages: ChatMessage[];
+      roomOwnerId: string | null;
     };
 
 export function getWsBaseUrl(): string {
@@ -58,7 +80,11 @@ function parseBroadcast(body: string): RoomBroadcast | null {
       kind !== 'USER_LIST' &&
       kind !== 'USER_JOINED' &&
       kind !== 'USER_LEFT' &&
-      kind !== 'ROOM_DELETED'
+      kind !== 'USER_REMOVED' &&
+      kind !== 'ROOM_NOT_FOUND' &&
+      kind !== 'ROOM_DELETED' &&
+      kind !== 'CHAT_HISTORY' &&
+      kind !== 'CHAT_MESSAGE'
     ) {
       return null;
     }
@@ -69,6 +95,30 @@ function parseBroadcast(body: string): RoomBroadcast | null {
 
     const userName = typeof raw.userName === 'string' ? raw.userName : null;
     const content = typeof raw.content === 'string' ? raw.content : '';
+    const roomOwnerId = typeof raw.roomOwnerId === 'string' ? raw.roomOwnerId : null;
+    const chatMessages: ChatMessage[] = Array.isArray(raw.chatMessages)
+      ? raw.chatMessages
+          .map((m) => {
+            if (!m || typeof m !== 'object') return null;
+            const record = m as Record<string, unknown>;
+            const messageId = typeof record.messageId === 'string' ? record.messageId : null;
+            const chatUserId = typeof record.userId === 'string' ? record.userId : null;
+            const chatUserName = typeof record.userName === 'string' ? record.userName : null;
+            const chatContent = typeof record.content === 'string' ? record.content : null;
+            const sentAt = typeof record.sentAt === 'number' ? record.sentAt : null;
+            if (!messageId || !chatUserId || !chatUserName || chatContent === null || sentAt === null) {
+              return null;
+            }
+            return {
+              messageId,
+              userId: chatUserId,
+              userName: chatUserName,
+              content: chatContent,
+              sentAt,
+            };
+          })
+          .filter((m): m is ChatMessage => m !== null)
+      : [];
     const users: RoomUser[] = Array.isArray(raw.users)
       ? raw.users
           .map((u) => {
@@ -82,7 +132,7 @@ function parseBroadcast(body: string): RoomBroadcast | null {
           .filter((u): u is RoomUser => u !== null)
       : [];
 
-    return { kind, roomId, userId, userName, content, users };
+    return { kind, roomId, userId, userName, content, users, chatMessages, roomOwnerId };
   } catch {
     return null;
   }
@@ -138,11 +188,39 @@ export function createStompCollaborationClient(options: StompCollaborationOption
         headers: { 'content-type': 'application/json' },
       });
     },
+    sendChatMessage(content: string) {
+      if (!client.connected) return;
+      client.publish({
+        destination: '/app/chat-message',
+        body: JSON.stringify({
+          roomId,
+          userId,
+          content,
+        }),
+        headers: { 'content-type': 'application/json' },
+      });
+    },
     leaveRoom() {
       if (!client.connected) return;
       client.publish({
         destination: '/app/leave-room',
         body: JSON.stringify({ roomId, userId }),
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+    transferOwnership(toUserId: string) {
+      if (!client.connected) return;
+      client.publish({
+        destination: '/app/transfer-ownership',
+        body: JSON.stringify({ roomId, fromUserId: userId, toUserId }),
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+    removeMember(targetUserId: string) {
+      if (!client.connected) return;
+      client.publish({
+        destination: '/app/remove-member',
+        body: JSON.stringify({ roomId, ownerUserId: userId, targetUserId }),
         headers: { 'content-type': 'application/json' },
       });
     },

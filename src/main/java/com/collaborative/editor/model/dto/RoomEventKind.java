@@ -9,5 +9,9 @@ public enum RoomEventKind {
     USER_LIST,
     USER_JOINED,
     USER_LEFT,
-    ROOM_DELETED
+    USER_REMOVED,
+    ROOM_NOT_FOUND,
+    ROOM_DELETED,
+    CHAT_HISTORY,
+    CHAT_MESSAGE
 }

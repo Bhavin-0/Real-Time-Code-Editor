@@ -59,9 +59,15 @@ class CollaborationWebSocketIntegrationTest {
             }
         });
 
+        ResponseEntity<Void> createResp = restTemplate.postForEntity(
+            "http://127.0.0.1:" + port + "/api/rooms/demo-room",
+            null,
+            Void.class);
+        assertThat(createResp.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
         session.send("/app/join-room", new JoinRoomPayload("demo-room", "alice-1", "alice"));
 
-        RoomEventPayload afterJoin = messages.poll(5, TimeUnit.SECONDS);
+        RoomEventPayload afterJoin = awaitKind(messages, RoomEventKind.SNAPSHOT, 5);
         assertThat(afterJoin).isNotNull();
         assertThat(afterJoin.kind()).isEqualTo(RoomEventKind.SNAPSHOT);
         assertThat(afterJoin.roomId()).isEqualTo("demo-room");
@@ -71,13 +77,12 @@ class CollaborationWebSocketIntegrationTest {
         assertThat(afterJoin.users()).hasSize(1);
         assertThat(afterJoin.users().get(0).userName()).isEqualTo("alice");
 
-        // Consume USER_JOINED and USER_LIST emitted after snapshot.
-        messages.poll(5, TimeUnit.SECONDS);
-        messages.poll(5, TimeUnit.SECONDS);
+        awaitKind(messages, RoomEventKind.USER_LIST, 5);
+        awaitKind(messages, RoomEventKind.CHAT_HISTORY, 5);
 
         session.send("/app/code-sync", new CodeUpdatePayload("demo-room", "public class Demo {}", "alice-1"));
 
-        RoomEventPayload afterEdit = messages.poll(5, TimeUnit.SECONDS);
+        RoomEventPayload afterEdit = awaitKind(messages, RoomEventKind.CODE_SYNC, 5);
         assertThat(afterEdit).isNotNull();
         assertThat(afterEdit.kind()).isEqualTo(RoomEventKind.CODE_SYNC);
         assertThat(afterEdit.content()).isEqualTo("public class Demo {}");
@@ -108,9 +113,15 @@ class CollaborationWebSocketIntegrationTest {
             }
         });
 
+        ResponseEntity<Void> createResp = restTemplate.postForEntity(
+            "http://127.0.0.1:" + port + "/api/rooms/delete-me",
+            null,
+            Void.class);
+        assertThat(createResp.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
         session.send("/app/join-room", new JoinRoomPayload("delete-me", "bob-1", "bob"));
 
-        RoomEventPayload joinEv = messages.poll(5, TimeUnit.SECONDS);
+        RoomEventPayload joinEv = awaitKind(messages, RoomEventKind.SNAPSHOT, 5);
         assertThat(joinEv).isNotNull();
         assertThat(joinEv.kind()).isEqualTo(RoomEventKind.SNAPSHOT);
 
@@ -122,15 +133,108 @@ class CollaborationWebSocketIntegrationTest {
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
 
-            // Consume USER_JOINED and USER_LIST emitted after snapshot.
-            messages.poll(5, TimeUnit.SECONDS);
-            messages.poll(5, TimeUnit.SECONDS);
+        awaitKind(messages, RoomEventKind.USER_LIST, 5);
+        awaitKind(messages, RoomEventKind.CHAT_HISTORY, 5);
 
-        RoomEventPayload deleted = messages.poll(5, TimeUnit.SECONDS);
+        RoomEventPayload deleted = awaitKind(messages, RoomEventKind.ROOM_DELETED, 5);
         assertThat(deleted).isNotNull();
         assertThat(deleted.kind()).isEqualTo(RoomEventKind.ROOM_DELETED);
         assertThat(deleted.roomId()).isEqualTo("delete-me");
 
         session.disconnect();
+    }
+
+    @Test
+    void secondJoinerReceivesExistingCodeInSnapshot() throws Exception {
+        WebSocketStompClient stompClient = new WebSocketStompClient(new StandardWebSocketClient());
+        stompClient.setMessageConverter(new MappingJackson2MessageConverter());
+
+        String wsUrl = "ws://127.0.0.1:" + port + "/ws";
+
+        StompSession firstSession = stompClient
+                .connectAsync(wsUrl, new StompSessionHandlerAdapter() {})
+                .get(10, TimeUnit.SECONDS);
+
+        BlockingQueue<RoomEventPayload> firstMessages = new LinkedBlockingQueue<>();
+        firstSession.subscribe("/topic/room/snapshot-room", new StompFrameHandler() {
+            @Override
+            public Type getPayloadType(StompHeaders headers) {
+                return RoomEventPayload.class;
+            }
+
+            @Override
+            public void handleFrame(StompHeaders headers, Object payload) {
+                firstMessages.offer((RoomEventPayload) payload);
+            }
+        });
+
+        ResponseEntity<Void> createResp = restTemplate.postForEntity(
+                "http://127.0.0.1:" + port + "/api/rooms/snapshot-room",
+                null,
+                Void.class);
+        assertThat(createResp.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+        firstSession.send("/app/join-room", new JoinRoomPayload("snapshot-room", "alice-1", "alice"));
+
+        awaitKind(firstMessages, RoomEventKind.SNAPSHOT, 5);
+        awaitKind(firstMessages, RoomEventKind.USER_LIST, 5);
+        awaitKind(firstMessages, RoomEventKind.CHAT_HISTORY, 5);
+
+        String existingCode = "function greet(){ return 'hello'; }";
+        firstSession.send("/app/code-sync", new CodeUpdatePayload("snapshot-room", existingCode, "alice-1"));
+
+        RoomEventPayload afterEdit = awaitKind(firstMessages, RoomEventKind.CODE_SYNC, 5);
+        assertThat(afterEdit).isNotNull();
+        assertThat(afterEdit.content()).isEqualTo(existingCode);
+
+        StompSession secondSession = stompClient
+                .connectAsync(wsUrl, new StompSessionHandlerAdapter() {})
+                .get(10, TimeUnit.SECONDS);
+
+        BlockingQueue<RoomEventPayload> secondMessages = new LinkedBlockingQueue<>();
+        secondSession.subscribe("/topic/room/snapshot-room", new StompFrameHandler() {
+            @Override
+            public Type getPayloadType(StompHeaders headers) {
+                return RoomEventPayload.class;
+            }
+
+            @Override
+            public void handleFrame(StompHeaders headers, Object payload) {
+                secondMessages.offer((RoomEventPayload) payload);
+            }
+        });
+
+        secondSession.send("/app/join-room", new JoinRoomPayload("snapshot-room", "bob-1", "bob"));
+
+        RoomEventPayload secondSnapshot = awaitKind(secondMessages, RoomEventKind.SNAPSHOT, 5);
+        assertThat(secondSnapshot).isNotNull();
+        assertThat(secondSnapshot.content()).isEqualTo(existingCode);
+        assertThat(secondSnapshot.users()).isNotNull();
+        assertThat(secondSnapshot.users()).extracting("userName").contains("alice", "bob");
+
+        secondSession.disconnect();
+        firstSession.disconnect();
+    }
+
+    private static RoomEventPayload awaitKind(
+            BlockingQueue<RoomEventPayload> messages,
+            RoomEventKind kind,
+            int timeoutSeconds) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while (System.nanoTime() < deadlineNanos) {
+            long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
+            if (remainingMillis <= 0) {
+                break;
+            }
+
+            RoomEventPayload payload = messages.poll(remainingMillis, TimeUnit.MILLISECONDS);
+            if (payload == null) {
+                break;
+            }
+            if (payload.kind() == kind) {
+                return payload;
+            }
+        }
+        return null;
     }
 }

@@ -5,6 +5,7 @@ type SidebarProps = {
   onCreateRoom: () => void;
   onDeleteRoom: (roomId: string) => void;
   currentUserShort: string;
+  canDeleteRoom: boolean;
 };
 
 function initialsFromId(id: string): string {
@@ -19,6 +20,7 @@ export default function Sidebar({
   onCreateRoom,
   onDeleteRoom,
   currentUserShort,
+  canDeleteRoom,
 }: SidebarProps) {
   return (
     <aside className="flex shrink-0 flex-col border-outline bg-elevated shadow-soft lg:w-64 lg:border-r">
@@ -61,20 +63,22 @@ export default function Sidebar({
                 >
                   {id}
                 </button>
-                <button
-                  type="button"
-                  aria-label={`Delete room ${id}`}
-                  title="Delete room"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm(`Delete room "${id}" for everyone?`)) {
-                      onDeleteRoom(id);
-                    }
-                  }}
-                  className="shrink-0 rounded-md px-2 text-muted transition-colors duration-200 hover:bg-canvas hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                >
-                  ×
-                </button>
+                {canDeleteRoom ? (
+                  <button
+                    type="button"
+                    aria-label={`Delete room ${id}`}
+                    title="Delete room"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Delete room "${id}" for everyone?`)) {
+                        onDeleteRoom(id);
+                      }
+                    }}
+                    className="shrink-0 rounded-md px-2 text-muted transition-colors duration-200 hover:bg-canvas hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    ×
+                  </button>
+                ) : null}
               </div>
             );
           })}

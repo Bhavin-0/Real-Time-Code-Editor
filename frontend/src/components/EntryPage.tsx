@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ThemeToggle from './ThemeToggle';
+import { createRoomApi, roomExistsApi } from '../services/roomApi';
 
 const STORAGE_USER_NAME = 'collab-user-name';
 const STORAGE_LAST_ROOM = 'collab-last-room-id';
@@ -15,6 +16,7 @@ export default function EntryPage() {
   const [name, setName] = useState(() => localStorage.getItem(STORAGE_USER_NAME) ?? '');
   const [roomId, setRoomId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const locationError = useMemo(() => {
     const state = location.state as { error?: string } | null;
@@ -36,7 +38,7 @@ export default function EntryPage() {
     return true;
   };
 
-  const handleJoin = (e: FormEvent) => {
+  const handleJoin = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -53,12 +55,25 @@ export default function EntryPage() {
       return;
     }
 
-    localStorage.setItem(STORAGE_USER_NAME, nextName);
-    localStorage.setItem(STORAGE_LAST_ROOM, nextRoom);
-    navigate(`/room/${encodeURIComponent(nextRoom)}`);
+    setBusy(true);
+    try {
+      const exists = await roomExistsApi(nextRoom);
+      if (!exists) {
+        setError('Room not found. Ask for a valid Room ID or create a new room.');
+        return;
+      }
+
+      localStorage.setItem(STORAGE_USER_NAME, nextName);
+      localStorage.setItem(STORAGE_LAST_ROOM, nextRoom);
+      navigate(`/room/${encodeURIComponent(nextRoom)}`);
+    } catch {
+      setError('Unable to verify room. Check backend connection.');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleCreateRoom = () => {
+  const handleCreateRoom = async () => {
     setError(null);
     const nextName = name.trim();
     if (!validateName(nextName)) return;
@@ -68,9 +83,17 @@ export default function EntryPage() {
         ? crypto.randomUUID()
         : `room-${Date.now()}`;
 
-    localStorage.setItem(STORAGE_USER_NAME, nextName);
-    localStorage.setItem(STORAGE_LAST_ROOM, id);
-    navigate(`/room/${encodeURIComponent(id)}`);
+    setBusy(true);
+    try {
+      await createRoomApi(id);
+      localStorage.setItem(STORAGE_USER_NAME, nextName);
+      localStorage.setItem(STORAGE_LAST_ROOM, id);
+      navigate(`/room/${encodeURIComponent(id)}`);
+    } catch {
+      setError('Unable to create room. Check backend connection.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -124,13 +147,15 @@ export default function EntryPage() {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <button
               type="submit"
+              disabled={busy}
               className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
             >
-              Join Room
+              {busy ? 'Please wait...' : 'Join Room'}
             </button>
             <button
               type="button"
               onClick={handleCreateRoom}
+              disabled={busy}
               className="rounded-lg border border-outline bg-canvas px-4 py-2.5 text-sm font-semibold text-foreground transition hover:border-accent"
             >
               Create New Room

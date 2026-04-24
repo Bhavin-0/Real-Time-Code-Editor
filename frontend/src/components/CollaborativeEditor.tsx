@@ -5,12 +5,38 @@ import EditorContainer from './EditorContainer';
 import Sidebar from './Sidebar';
 import UsersPanel, { type ActivityItem, type Collaborator } from './UsersPanel';
 import type { MonacoEditorInstance } from './EditorContainer';
-import { createStompCollaborationClient, type RoomUser } from '../services/collaborationStomp';
+import {
+  createStompCollaborationClient,
+  type ChatMessage,
+  type RoomUser,
+} from '../services/collaborationStomp';
 import { deleteRoomApi } from '../services/roomApi';
 
 const DEBOUNCE_MS = 240;
 const STORAGE_USER_NAME = 'collab-user-name';
 const STORAGE_LAST_ROOM = 'collab-last-room-id';
+const STORAGE_LEFT_WIDTH = 'collab-left-panel-width';
+const STORAGE_RIGHT_WIDTH = 'collab-right-panel-width';
+const STORAGE_USER_ID = 'collab-user-id';
+
+function stableUserId(): string {
+  const existing = (sessionStorage.getItem(STORAGE_USER_ID) ?? '').trim();
+  if (existing) return existing;
+
+  const next =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `user-${Math.random().toString(36).slice(2, 11)}`;
+  sessionStorage.setItem(STORAGE_USER_ID, next);
+  return next;
+}
+
+function initialPanelWidth(storageKey: string, fallback: number, min: number, max: number): number {
+  const raw = localStorage.getItem(storageKey);
+  const parsed = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
 
 export default function CollaborativeEditor() {
   const navigate = useNavigate();
@@ -23,24 +49,30 @@ export default function CollaborativeEditor() {
 
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [users, setUsers] = useState<RoomUser[]>([]);
+  const [roomOwnerId, setRoomOwnerId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [editorContent, setEditorContent] = useState('');
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [lastExitCode, setLastExitCode] = useState<number | null>(null);
   const [terminalHeight, setTerminalHeight] = useState(208);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
+    initialPanelWidth(STORAGE_LEFT_WIDTH, 256, 210, 420)
+  );
+  const [rightPanelWidth, setRightPanelWidth] = useState(() =>
+    initialPanelWidth(STORAGE_RIGHT_WIDTH, 320, 260, 520)
+  );
 
   const userNameRef = useRef((localStorage.getItem(STORAGE_USER_NAME) ?? '').trim());
-  const userIdRef = useRef(
-    typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `user-${Math.random().toString(36).slice(2, 11)}`
-  );
+  const userIdRef = useRef(stableUserId());
 
   const editorRef = useRef<MonacoEditorInstance | null>(null);
   const executionWsRef = useRef<WebSocket | null>(null);
   const terminalRef = useRef<HTMLPreElement | null>(null);
   const terminalResizeStartRef = useRef<{ y: number; height: number } | null>(null);
+  const leftResizeStartRef = useRef<{ x: number; width: number } | null>(null);
+  const rightResizeStartRef = useRef<{ x: number; width: number } | null>(null);
   const applyingRemoteRef = useRef(false);
   const stompRef = useRef<ReturnType<typeof createStompCollaborationClient> | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -57,14 +89,15 @@ export default function CollaborativeEditor() {
   }, []);
 
   const applyRemoteContent = useCallback((content: string | undefined) => {
+    const next = content ?? '';
+    setEditorContent(next);
+
     const ed = editorRef.current;
     if (!ed) return;
-    const next = content ?? '';
     if (ed.getValue() === next) return;
 
     applyingRemoteRef.current = true;
     ed.setValue(next);
-    setEditorContent(next);
     setTimeout(() => {
       applyingRemoteRef.current = false;
     }, 0);
@@ -73,6 +106,14 @@ export default function CollaborativeEditor() {
   const appendOutput = useCallback((chunk: string) => {
     setOutput((prev) => prev + chunk);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_LEFT_WIDTH, String(leftPanelWidth));
+  }, [leftPanelWidth]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_RIGHT_WIDTH, String(rightPanelWidth));
+  }, [rightPanelWidth]);
 
   const stopExecutionSocket = useCallback(() => {
     const ws = executionWsRef.current;
@@ -101,6 +142,7 @@ export default function CollaborativeEditor() {
 
     setConnectionStatus('connecting');
     setUsers([]);
+    setChatMessages([]);
     setActivity([]);
 
     const stomp = createStompCollaborationClient({
@@ -110,6 +152,15 @@ export default function CollaborativeEditor() {
       onRoomEvent: (ev) => {
         if (ev.roomId !== activeRoomId) return;
 
+        if (ev.kind === 'ROOM_NOT_FOUND') {
+          setConnectionStatus('disconnected');
+          navigate('/', {
+            replace: true,
+            state: { error: 'Room not found. Create a new room or use a valid Room ID.' },
+          });
+          return;
+        }
+
         if (ev.kind === 'ROOM_DELETED') {
           pushActivity('Room deleted. Returning to entry page.');
           setConnectionStatus('disconnected');
@@ -117,9 +168,21 @@ export default function CollaborativeEditor() {
           return;
         }
 
+        setRoomOwnerId(ev.roomOwnerId ?? null);
+
         if (ev.kind === 'SNAPSHOT') {
           setUsers(ev.users);
           applyRemoteContent(ev.content);
+          return;
+        }
+
+        if (ev.kind === 'CHAT_HISTORY') {
+          setChatMessages(ev.chatMessages);
+          return;
+        }
+
+        if (ev.kind === 'CHAT_MESSAGE') {
+          setChatMessages((prev) => [...prev, ...ev.chatMessages]);
           return;
         }
 
@@ -149,6 +212,19 @@ export default function CollaborativeEditor() {
           if (ev.userId !== userIdRef.current) {
             pushActivity(`${ev.userName ?? 'Someone'} left.`);
           }
+          return;
+        }
+
+        if (ev.kind === 'USER_REMOVED') {
+          setUsers(ev.users);
+          if (ev.userId === userIdRef.current) {
+            navigate('/', {
+              replace: true,
+              state: { error: 'You were removed from this room by the owner.' },
+            });
+            return;
+          }
+          pushActivity(`${ev.userName ?? 'A member'} was removed by the owner.`);
         }
       },
       onConnected: () => setConnectionStatus('connected'),
@@ -202,7 +278,7 @@ export default function CollaborativeEditor() {
 
   const handleMount = useCallback((ed: MonacoEditorInstance) => {
     editorRef.current = ed;
-    setEditorContent(ed.getValue());
+    setEditorContent((current) => (current ? current : ed.getValue()));
     ed.focus();
   }, []);
 
@@ -322,16 +398,89 @@ export default function CollaborativeEditor() {
     window.addEventListener('mouseup', handleUp);
   }, [terminalHeight]);
 
+  const handleLeftResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    leftResizeStartRef.current = {
+      x: event.clientX,
+      width: leftPanelWidth,
+    };
+
+    const handleMove = (moveEvent: MouseEvent) => {
+      const start = leftResizeStartRef.current;
+      if (!start) return;
+      const delta = moveEvent.clientX - start.x;
+      const nextWidth = Math.max(210, Math.min(420, start.width + delta));
+      setLeftPanelWidth(nextWidth);
+    };
+
+    const handleUp = () => {
+      leftResizeStartRef.current = null;
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+  }, [leftPanelWidth]);
+
+  const handleRightResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    rightResizeStartRef.current = {
+      x: event.clientX,
+      width: rightPanelWidth,
+    };
+
+    const handleMove = (moveEvent: MouseEvent) => {
+      const start = rightResizeStartRef.current;
+      if (!start) return;
+      const delta = start.x - moveEvent.clientX;
+      const nextWidth = Math.max(260, Math.min(520, start.width + delta));
+      setRightPanelWidth(nextWidth);
+    };
+
+    const handleUp = () => {
+      rightResizeStartRef.current = null;
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+  }, [rightPanelWidth]);
+
   const handleCopyRoomLink = useCallback(async () => {
     if (!activeRoomId) return;
-    const text = `${window.location.origin}/room/${encodeURIComponent(activeRoomId)}`;
+    const text = activeRoomId;
     try {
       await navigator.clipboard.writeText(text);
-      pushActivity('Room link copied.');
+      pushActivity('Room ID copied.');
     } catch {
-      window.prompt('Copy room link:', text);
+      window.prompt('Copy room ID:', text);
     }
   }, [activeRoomId, pushActivity]);
+
+  const handleTransferOwnership = useCallback((targetUserId: string) => {
+    if (!activeRoomId) return;
+    if (roomOwnerId !== userIdRef.current) return;
+    if (targetUserId === userIdRef.current) return;
+
+    stompRef.current?.transferOwnership(targetUserId);
+  }, [activeRoomId, roomOwnerId]);
+
+  const handleRemoveMember = useCallback((targetUserId: string) => {
+    if (!activeRoomId) return;
+    if (roomOwnerId !== userIdRef.current) return;
+    if (targetUserId === userIdRef.current) return;
+
+    stompRef.current?.removeMember(targetUserId);
+  }, [activeRoomId, roomOwnerId]);
+
+  const handleSendChatMessage = useCallback((message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed || !activeRoomId) return;
+
+    stompRef.current?.sendChatMessage(trimmed);
+  }, [activeRoomId]);
 
   const handleDeleteRoom = useCallback(async () => {
     if (!activeRoomId) return;
@@ -340,9 +489,15 @@ export default function CollaborativeEditor() {
       navigate('/', { replace: true });
     } catch (e) {
       console.error(e);
+      if (e instanceof Error && e.message === 'FORBIDDEN_DELETE') {
+        window.alert('Only the room owner can delete this room.');
+        return;
+      }
       window.alert('Could not delete room. Is the backend running and CORS enabled?');
     }
   }, [activeRoomId, navigate]);
+
+  const canDeleteRoom = roomOwnerId === userIdRef.current;
 
   const collaborators: Collaborator[] = useMemo(
     () =>
@@ -363,10 +518,11 @@ export default function CollaborativeEditor() {
         collaborators={collaborators}
         onCopyRoomLink={handleCopyRoomLink}
         onDeleteRoom={handleDeleteRoom}
+        canDeleteRoom={canDeleteRoom}
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_20rem]">
-        <div className="hidden min-h-0 border-r border-outline lg:flex">
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden min-h-0 lg:flex" style={{ width: leftPanelWidth }}>
           <Sidebar
             rooms={activeRoomId ? [activeRoomId] : []}
             activeRoomId={activeRoomId}
@@ -376,8 +532,20 @@ export default function CollaborativeEditor() {
               void handleDeleteRoom();
             }}
             currentUserShort={userNameRef.current || userIdRef.current.slice(0, 8)}
+            canDeleteRoom={canDeleteRoom}
           />
         </div>
+
+        <div
+          className="hidden w-2 cursor-col-resize bg-outline/60 lg:block"
+          onMouseDown={handleLeftResizeStart}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize left sidebar"
+          tabIndex={0}
+        />
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col xl:flex-row">
 
         <main className="relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4 lg:p-6">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -392,7 +560,11 @@ export default function CollaborativeEditor() {
 
           <div className="relative z-0 flex min-h-0 flex-1 flex-col gap-4">
             <div className="relative z-10 min-h-0 flex-1">
-              <EditorContainer onMount={handleMount} onChange={handleEditorChange} />
+              <EditorContainer
+                onMount={handleMount}
+                onChange={handleEditorChange}
+                value={editorContent}
+              />
             </div>
 
             <section
@@ -467,8 +639,30 @@ export default function CollaborativeEditor() {
           </div>
         </main>
 
-        <div className="min-h-0 border-t border-outline xl:flex xl:w-80 xl:shrink-0 xl:border-l xl:border-t-0">
-          <UsersPanel collaborators={collaborators} activity={activity} />
+        <div
+          className="hidden w-2 cursor-col-resize bg-outline/60 xl:block"
+          onMouseDown={handleRightResizeStart}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize collaboration panel"
+          tabIndex={0}
+        />
+
+        <div
+          className="min-h-0 w-full border-t border-outline xl:w-auto xl:shrink-0 xl:border-t-0"
+          style={{ width: typeof window !== 'undefined' && window.innerWidth >= 1280 ? rightPanelWidth : undefined }}
+        >
+          <UsersPanel
+            collaborators={collaborators}
+            activity={activity}
+            chatMessages={chatMessages}
+            roomOwnerId={roomOwnerId}
+            currentUserId={userIdRef.current}
+            onTransferOwnership={handleTransferOwnership}
+            onRemoveMember={handleRemoveMember}
+            onSendChatMessage={handleSendChatMessage}
+          />
+        </div>
         </div>
       </div>
     </div>

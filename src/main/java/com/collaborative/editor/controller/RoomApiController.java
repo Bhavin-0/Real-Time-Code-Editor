@@ -4,12 +4,15 @@ import com.collaborative.editor.model.dto.RoomEventKind;
 import com.collaborative.editor.model.dto.RoomEventPayload;
 import com.collaborative.editor.service.RoomRegistryService;
 import jakarta.validation.constraints.NotBlank;
+import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,16 +35,31 @@ public class RoomApiController {
         this.messagingTemplate = messagingTemplate;
     }
 
+    @GetMapping("/{roomId}/exists")
+    public Map<String, Boolean> roomExists(@PathVariable String roomId) {
+        return Map.of("exists", roomRegistryService.roomExists(roomId));
+    }
+
+    @PostMapping("/{roomId}")
+    public ResponseEntity<Void> createRoom(@PathVariable String roomId) {
+        roomRegistryService.createRoom(roomId);
+        return ResponseEntity.noContent().build();
+    }
+
     @DeleteMapping("/{roomId}")
     public ResponseEntity<Void> deleteRoom(
             @PathVariable String roomId,
             @RequestParam @NotBlank String userId) {
-        if (!roomRegistryService.deleteRoom(roomId)) {
+        if (!roomRegistryService.roomExists(roomId)) {
             return ResponseEntity.notFound().build();
         }
+        if (!roomRegistryService.isRoomOwner(roomId, userId)) {
+            return ResponseEntity.status(403).build();
+        }
+        roomRegistryService.deleteRoom(roomId);
         messagingTemplate.convertAndSend(
                 CollaborationWebSocketController.ROOM_TOPIC_PREFIX + roomId,
-            new RoomEventPayload(RoomEventKind.ROOM_DELETED, roomId, userId, null, null, null));
+            new RoomEventPayload(RoomEventKind.ROOM_DELETED, roomId, userId, null, null, null, null, null));
         return ResponseEntity.noContent().build();
     }
 }
