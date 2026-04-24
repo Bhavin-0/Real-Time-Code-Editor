@@ -28,14 +28,6 @@ export default function EntryPage() {
     }
   }, [location.pathname, locationError, navigate]);
 
-  useEffect(() => {
-    const savedName = (localStorage.getItem(STORAGE_USER_NAME) ?? '').trim();
-    const savedRoom = (localStorage.getItem(STORAGE_LAST_ROOM) ?? '').trim();
-    if (!savedName || !savedRoom) return;
-    if (!isValidRoomId(savedRoom)) return;
-    navigate(`/room/${encodeURIComponent(savedRoom)}`, { replace: true });
-  }, [navigate]);
-
   const validateName = (candidate: string): boolean => {
     if (!candidate.trim()) {
       setError('Name is required.');
