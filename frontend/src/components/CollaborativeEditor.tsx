@@ -301,7 +301,8 @@ export default function CollaborativeEditor() {
     stopExecutionSocket();
 
     try {
-      const httpUrl = import.meta.env.VITE_EXECUTION_HTTP || 'http://localhost:8080/execute';
+      const httpBase = import.meta.env.VITE_EXECUTION_HTTP || 'http://localhost:8080';
+      const httpUrl = `${httpBase.replace(/\/$/, '')}/execute`;
       const response = await fetch(httpUrl, {
         method: 'POST',
         headers: {
@@ -319,7 +320,8 @@ export default function CollaborativeEditor() {
         throw new Error('Missing jobId in response');
       }
 
-      const wsUrl = import.meta.env.VITE_EXECUTION_WS || 'ws://localhost:3001/ws';
+      const wsBase = import.meta.env.VITE_EXECUTION_WS || 'ws://localhost:3001';
+      const wsUrl = `${wsBase.replace(/\/$/, '')}/ws`;
       const ws = new WebSocket(`${wsUrl}?jobId=${encodeURIComponent(payload.jobId)}`);
       executionWsRef.current = ws;
 
@@ -365,14 +367,15 @@ export default function CollaborativeEditor() {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault();
+        event.stopPropagation();
         if (!isRunning) {
           handleRunCode();
         }
       }
     };
 
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [handleRunCode, isRunning]);
 
   const handleTerminalResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {

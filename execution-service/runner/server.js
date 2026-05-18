@@ -26,6 +26,17 @@ function startJobIfReady(jobId) {
 
 // 👇 create HTTP server
 const server = http.createServer((req, res) => {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "OPTIONS, POST, GET",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, headers);
+    res.end();
+    return;
+  }
 
   // ✅ ONLY route: POST /execute
   if (req.method === "POST" && req.url === "/execute") {
@@ -46,13 +57,13 @@ const server = http.createServer((req, res) => {
         const { jobId, code } = JSON.parse(body);
 
         if (!jobId || !code) {
-          res.writeHead(400, { "Content-Type": "application/json" });
+          res.writeHead(400, { "Content-Type": "application/json", ...headers });
           return res.end(JSON.stringify({ error: "Missing jobId or code" }));
         }
 
         // 🔒 optional limit
         if (code.length > 5000) {
-          res.writeHead(400);
+          res.writeHead(400, headers);
           return res.end(JSON.stringify({ error: "Code too large" }));
         }
 
@@ -65,11 +76,11 @@ const server = http.createServer((req, res) => {
           startJobIfReady(jobId);
         }
 
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(200, { "Content-Type": "application/json", ...headers });
         res.end(JSON.stringify({ status: "queued", jobId }));
 
       } catch (err) {
-        res.writeHead(500);
+        res.writeHead(500, headers);
         res.end(JSON.stringify({ error: "Invalid JSON" }));
       }
     });
@@ -78,7 +89,7 @@ const server = http.createServer((req, res) => {
   }
 
   // ❌ everything else
-  res.writeHead(404);
+  res.writeHead(404, headers);
   res.end();
 });
 
