@@ -321,7 +321,7 @@ export default function CollaborativeEditor() {
       }
 
       const rawWsBase = import.meta.env.VITE_EXECUTION_WS || 'ws://localhost:3001';
-      const wsBase = rawWsBase.replace(/^http/, 'ws');
+      const wsBase = rawWsBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
       const wsUrl = `${wsBase.replace(/\/$/, '')}/ws`;
       const ws = new WebSocket(`${wsUrl}?jobId=${encodeURIComponent(payload.jobId)}`);
       executionWsRef.current = ws;
