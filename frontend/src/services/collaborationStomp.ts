@@ -61,9 +61,15 @@ export type RoomBroadcast =
       roomOwnerId: string | null;
     };
 
-export function getWsBaseUrl(): string {
-  const base = import.meta.env.VITE_WS_BASE || 'http://localhost:8080';
-  return base.replace(/\/$/, '');
+export function getSocketUrl(): string {
+  const baseUrl = import.meta.env.VITE_WS_BASE || 'http://localhost:8080';
+  const trimmed = baseUrl.replace(/\/$/, '');
+  return trimmed.replace(/^http/, 'ws');
+}
+
+export function getHttpBaseUrl(): string {
+  const baseUrl = import.meta.env.VITE_WS_BASE || 'http://localhost:8080';
+  return baseUrl.replace(/\/$/, '');
 }
 
 export function roomSubscriptionTopic(roomId: string): string {
@@ -151,7 +157,8 @@ export function createStompCollaborationClient(options: StompCollaborationOption
   const { roomId, userId, userName, onRoomEvent, onConnected, onDisconnected } = options;
 
   const client = new Client({
-    webSocketFactory: () => new SockJS(`${getWsBaseUrl()}/ws`),
+    brokerURL: `${getSocketUrl()}/ws`,
+    webSocketFactory: () => new SockJS(`${getHttpBaseUrl()}/ws`),
     reconnectDelay: 4000,
     heartbeatIncoming: 10000,
     heartbeatOutgoing: 10000,

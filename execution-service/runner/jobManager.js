@@ -115,29 +115,24 @@ function runJob(jobId, payload, input = "") {
     return null;
   }
 
+  /*
+  // --- OLD DIND LOGIC (Commented out for Render Deployment) ---
   const dockerArgs = [
-    "run",
-    "--rm",
-    "--name",
-    containerName,
-    "--network=none",
-    "--memory=128m",
-    "--cpus=0.5",
-    "--pids-limit=64",
-    "--read-only",
-    "--tmpfs",
-    "/tmp",
-    "--security-opt",
-    "no-new-privileges",
-    "-i",
-    "-v",
-    `${tempDir}:/app:ro`,
-    "node:18",
-    "node",
-    "/app/code.js",
+    "run", "--rm", "--name", containerName,
+    "--network=none", "--memory=128m", "--cpus=0.5",
+    "--pids-limit=64", "--read-only", "--tmpfs", "/tmp",
+    "--security-opt", "no-new-privileges", "-i",
+    "-v", `${tempDir}:/app:ro`,
+    "node:18", "node", "/app/code.js",
   ];
-
   const child = spawn("docker", dockerArgs, {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  */
+
+  // --- NEW NATIVE NODE LOGIC ---
+  const nodeArgs = [path.join(tempDir, "code.js")];
+  const child = spawn("node", nodeArgs, {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -154,7 +149,7 @@ function runJob(jobId, payload, input = "") {
       clearTimeout(timeoutId);
     }
 
-    removeContainer(containerName);
+    // removeContainer(containerName); // Removed for native Node
 
     if (tempDir) {
       fs.rm(tempDir, { recursive: true, force: true }, () => {});
@@ -186,8 +181,8 @@ function runJob(jobId, payload, input = "") {
     }
 
     child.kill("SIGKILL");
-    killContainer(containerName);
-    removeContainer(containerName);
+    // killContainer(containerName);    // Removed for native Node
+    // removeContainer(containerName);  // Removed for native Node
     emitStderr(jobId, "Execution timed out");
   }, EXECUTION_TIMEOUT_MS);
 

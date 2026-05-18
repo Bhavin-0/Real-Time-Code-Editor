@@ -51,31 +51,24 @@ async function executeCode({ code, input = "" }) {
   try {
     await fs.writeFile(scriptPath, code, "utf8");
 
+    /*
+    // --- OLD DIND LOGIC (Commented out for Render Deployment) ---
     const dockerArgs = [
-      "run",
-      "--rm",
-      "--name",
-      containerName,
-      "--network=none",
-      "--memory=128m",
-      "--cpus=0.5",
-      "--read-only",
-      "--pids-limit=50",
-      "--user=1000",
-      "-i",
-      "--workdir",
-      "/workspace",
-      "-v",
-      `${tempDir}:/workspace:ro`,
-      "node:18",
-      "node",
-      "main.js",
+      "run", "--rm", "--name", containerName,
+      "--network=none", "--memory=128m", "--cpus=0.5",
+      "--read-only", "--pids-limit=50", "--user=1000",
+      "-i", "--workdir", "/workspace",
+      "-v", `${tempDir}:/workspace:ro`,
+      "node:18", "node", "main.js",
     ];
+    const child = spawnProcess("docker", dockerArgs);
+    */
 
+    // --- NEW NATIVE NODE LOGIC ---
     // 🔥 START TIMER
     const startTime = performance.now();
-
-    const child = spawnProcess("docker", dockerArgs);
+    const nodeArgs = [scriptPath];
+    const child = spawnProcess("node", nodeArgs);
 
     const stdoutChunks = [];
     const stderrChunks = [];
@@ -98,7 +91,7 @@ async function executeCode({ code, input = "" }) {
     timeoutId = setTimeout(async () => {
       timedOut = true;
       child.kill("SIGKILL");
-      await cleanupContainer(containerName);
+      // await cleanupContainer(containerName); // Removed for native Node
     }, EXECUTION_TIMEOUT_MS);
 
     const exitCode = await waitForClose(child);
