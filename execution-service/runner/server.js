@@ -54,11 +54,16 @@ const server = http.createServer((req, res) => {
 
     req.on("end", () => {
       try {
-        const { jobId, code } = JSON.parse(body);
+        const crypto = require("crypto");
+        let { jobId, code } = JSON.parse(body);
 
-        if (!jobId || !code) {
+        if (!jobId) {
+          jobId = crypto.randomUUID();
+        }
+
+        if (!code) {
           res.writeHead(400, { "Content-Type": "application/json", ...headers });
-          return res.end(JSON.stringify({ error: "Missing jobId or code" }));
+          return res.end(JSON.stringify({ error: "Missing code" }));
         }
 
         // 🔒 optional limit
