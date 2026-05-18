@@ -301,7 +301,8 @@ export default function CollaborativeEditor() {
     stopExecutionSocket();
 
     try {
-      const response = await fetch('http://localhost:8080/execute', {
+      const httpUrl = import.meta.env.VITE_EXECUTION_HTTP || 'http://localhost:8080/execute';
+      const response = await fetch(httpUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -318,7 +319,8 @@ export default function CollaborativeEditor() {
         throw new Error('Missing jobId in response');
       }
 
-      const ws = new WebSocket(`ws://localhost:3001/ws?jobId=${encodeURIComponent(payload.jobId)}`);
+      const wsUrl = import.meta.env.VITE_EXECUTION_WS || 'ws://localhost:3001/ws';
+      const ws = new WebSocket(`${wsUrl}?jobId=${encodeURIComponent(payload.jobId)}`);
       executionWsRef.current = ws;
 
       ws.onmessage = (event) => {

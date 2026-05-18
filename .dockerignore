@@ -1,0 +1,11 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!target/*.jar
+*~
+*.swp
+*.class
+.idea/
+.vscode/
+.DS_Store
+frontend/
+execution-service/
